@@ -1,34 +1,74 @@
-import operator
+import logging
+import os
+import json
+import string
+from gzip import GzipFile
+from bs4 import BeautifulSoup as bs
 import numpy as np
-import pandas as pd
-import algo
-import docvector
-import util
+import nltk
 
-def all_terms(train_csv):
-    all_terms = set()
-    for i in train_csv['doc']:
-        all_terms |= frozenset(docvector.DocVector(i, None).terms)
+OUT_JSON = 'preprocessed.json'
+REUTERS_TGZ = '/home/ggaarder/home/download/websites/www.daviddlewis.com\
+/resources/testcollections/reuters21578/reuters21578.tar.gz'
+STOPWORDS = nltk.corpus.stopwords.words('english')
+LMTZR = nltk.stem.wordnet.WordNetLemmatizer()
+STEMMER = nltk.stem.LancasterStemmer()
+TOPICS_WHITELIST = [ 'earn', 'acq', 'trade', 'ship', # see the bdc paper
+                     'grain', 'crude', 'interest', 'money-fx']
+RARE_TERMS_LINE = 100 # terms appears less than ___ times will be ignored
 
-    return sorted(all_terms)
+def parse(news_soup):
+    if len(news_soup.topics.find_all('d')) != 1 or news_soup.topics.d.string not in TOPICS_WHITELIST:
+        continue
+            
+    news = {
+        'topic': news_soup.topics.d.string,
+        'oldid': news_soup['oldid'],
+        'newid': news_soup['newid'],
+        'lewissplit': news_soup['lewissplit'],
+        'cgisplit': news_soup['cgisplit'],
+    }
 
-def df(t, train_csv):
-    return algo.count_if(train_csv['doc'], lambda d: t in d)
+    doc = news_soup.title.string+' '+news_soup.body.string
+    doc = [re.sub(r'[^a-z]', '', t) for t in nltk.word_tokenize(doc.lower())]
+    doc = [STEMMER.stem(LMTZR.lemmatize(t)) for t in doc
+           if len(t)>2 and t not in STOPWORDS]
+    news['tf'] = {t: doc.count(t) for t in sorted(set(doc))}
 
+    return news
+    
 if __name__ == '__main__':
-    train_csv = pd.read_csv(util.TRAIN_CSV)
+    logging.basicConfig(level=logging.INFO)
+    with GzipFile(REUTERS_TGZ) as gz:
+        raw_SGML = str([ch for ch in gz.read() if ch in string.printable])
+    soup = bs(raw_SGML, 'xml.parser').reuters
+    all_terms = set()
+    all_topics = sorted(TOPICS_WHITELIST)
+    all_news = []
+    
+    for i, news_soup in enumerate(soup):
+        logging.info('%d', i)
+        try:
+            news = parse(news_soup)
+        except:
+            continue
+        all_terms |= frozenset(news['tf'].keys())
+        all_news.append(news)
 
-    try:
-        cache = pd.read_csv(util.CACHE_FILE)
-    except FileNotFoundError:
-        cache = pd.DataFrame(
-            [[i, np.nan, np.nan, np.nan] for i in all_terms(train_csv)],
-            columns=['term', 'df', 'idf', 'bdc'])
-
-    # calc df
-    for i,t in enumerate(cache['term']):
-        if not pd.isna(cache['df'][i]):
-            cache['df'][i] = df(t, train_csv)
-
-    with open(util.CACHE_FILE, 'w') as o:
-        o.write(cache.to_csv())
+    # remove rare terms
+    all_terms = [t for t in sorted(all_terms)
+                 if sum([news['tf'].get(t, 0)
+                         for news in all_news]) > RARE_TERMS_LINE]
+    for news in all_news:
+        for t in news['tf'].keys():
+            if t not in all_terms:
+                del news['tf'][t]
+    
+    out_json = {
+        'all_terms': all_terms,
+        'all_topics': all_topics,
+        'news': all_news
+    }
+                    
+    with open(OUT_JSON, 'w') as o:
+        json.dump(out_json, o, indent=2)

@@ -1,79 +1,125 @@
 """
-Text Classification
-
-Train/Test: Neuters 21578 LEWISSPLIT
-exam with TRAINCSV and TESTCSV, splited according to the LEWISSPLIT
-attribution in <NEUTERS> of the original .sgm file
-
-Method: KNN, bdc
-todo:
-- the accuracy should at ~ 94%
-- SVM
+Test knn+bdc with [reuters21578][www.daviddlewis.com/resources/testcollections/
+reuters21578/reuters21578.tar.gz]
 """
-
-import argparse
 import logging
+import json
+import math
+import random
+import progressbar
+import numpy as np
 import pandas as pd
-import algo
-import util
+import parse
+from bdc import calc_bdc
+from knn import knn
 
-def similarity(doc1, doc2, cache, wfunc):
-    """cosine"""
-    doc1vec, doc2vec = algo.DocVector(doc1), algo.DocVector(doc2)
+def cos(v1, v2):
+    return np.dot(v1, v2)/math.sqrt(np.sum(v1**2))/math.sqrt(np.sum(v2**2))
 
-    terms = set(doc1vec.terms) & set(doc2vec.terms) & set(cache['term'])
-    terms = sorted(terms)
+def get_terms(ids):
+    all_terms = set()
+    for i in news_json:
+        if i['newid'] in ids:
+            all_terms |= frozenset(i['tf'].keys())
+    return all_terms
 
-    if wfunc == 'tfidf':
-        weights = [float(cache[cache.term == t]['idf']) for t in terms]
-    elif wfunc == 'tfbdc':
-        weights = [float(cache[cache.term == t]['bdc']) for t in terms]
+def test_general(testids, trainids):
+    """
+    We can't speed up since:
+    (1) We can't use multiprocessing to speed up, since calc_bdc used it and
+    Python doesn't allow a `daemon` (i.e. a forked processes) to `have
+    children`. (i.e. fork)
+    (2) We don't use threads since it doesn't speed up in our case, since
+    the task is CPU-bound.
+    """
+    logging.info('test: %d, train: %d', len(testids), len(trainids))
 
-    doc1vec = [doc1vec.get_tf(terms[i])*weights[i] for i in range(len(terms))]
-    doc2vec = [doc2vec.get_tf(terms[i])*weights[i] for i in range(len(terms))]
+    trainterms = get_terms(trainids)
 
-    return algo.Vector(doc1vec).cos(algo.Vector(doc2vec))
+    logging.info('experiment begins')
+    correctcnt = 0
+    bar = progressbar.ProgressBar(
+        widgets=[progressbar.Percentage(),
+                 progressbar.Bar('>'),
+                 progressbar.DynamicMessage('accuracy')],
+        max_value=len(testids)).start()
+    
+    for no, testid in enumerate(testids):
+        for n in news_json:
+            if n['newid'] == testid:
+                testjson = n
+                break
 
-def predict(doc, train, cache, wfunc):
-    """predict doc's category"""
-    return algo.knn(5, [
-        [train.loc[i, 'label'],
-         similarity(doc, train.loc[i, 'doc'], cache, wfunc)]
-        for i in range(len(train))])
+        usedterms = sorted(get_terms([testid]) & trainterms)
+        trainvec = []
+        trainlabels = []
+        
+        for i in news_json:
+            if i['newid'] in trainids:
+                vec = [i['tf'].get(t, 0) for t in usedterms]
+                if np.sum(vec) != 0:
+                    trainvec.append(vec)
+                    trainlabels.append(i['topic'])
+                
+        bdcs = calc_bdc(pd.DataFrame(
+            trainvec,
+            index=trainlabels,
+            columns=usedterms))
+        trainvec *= bdcs.T.values
+        testvec = bdcs.T.values*[testjson['tf'].get(t, 0) for t in usedterms]
+        sim = [cos(testvec, v) for v in trainvec]
+        knndat = [[trainlabels[i], sim[i]] for i in range(len(sim))]
+        res = knn(5, knndat)
+        
+        if res == testjson['topic']:
+            correctcnt += 1
+        bar.update(no+1, accuracy=correctcnt/(no+1))
 
-def experiment(test, train, wfunc):
-    """test"""
-    cache = pd.read_csv(util.CACHE_FILE)
-    actual, expect = [], []
+    return correctcnt/len(testids)
+        
+def test_lewis():
+    logging.info('figuring out lewissplit')
+    testids = []
+    trainids = []
 
-    out = open(util.EXPERIMENT_FILE, 'w')
-    out.write('actual,expect\n')
+    for i in news_json:
+        if not i['reject']:
+            if i['lewissplit'] == 'TRAIN':
+                trainids.append(i['newid'])
+            elif i['lewissplit'] == 'TEST':
+                testids.append(i['newid'])
 
-    for i in range(len(test)):
-        expect.append(test.loc[i, 'label'])
-        actual.append(predict(test.loc[i, 'doc'], train, cache, wfunc))
+    return test_general(testids, trainids)
 
-        logging.info('#%d: %f', i, algo.accuracy(actual, expect))
+def test_random():
+    """Results: 0.846 0.847"""
+    VALID_NEWS_TERMS_LOWER_BOUND = 30 # skip news with too few words
+    TEST_PERCENT = 20 # how big the test sample is
+    testids = []
+    trainids = []
 
-        out.write('{},{}\n'.format(actual[-1], expect[-1]))
-        out.flush()
+    for i in news_json:
+        if i['reject']:
+            continue
+        if len(i['tf'].keys()) < VALID_NEWS_TERMS_LOWER_BOUND:
+            continue
 
-    out.close()
+        if random.randrange(0, 100) < TEST_PERCENT:
+            testids.append(i['newid'])
+        else:
+            trainids.append(i['newid'])
 
-    logging.info('Experiment success')
-    logging.info('Weight Function: %s', wfunc)
-    logging.info('Accuracy: %f', algo.accuracy(actual, expect))
-    logging.info('Micro F1: %f', algo.micro_f1(actual, expect))
-    logging.info('Macro F1: %f', algo.macro_f1(actual, expect))
-    logging.info('Result saved to %s', util.EXPERIMENT_FILE)
-
+    return test_general(testids, trainids)
+        
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    PARSER = argparse.ArgumentParser()
-    PARSER.add_argument("-w", "--weight-func", type=str,
-                        default='tfbdc',
-                        choices=['tfbdc', 'tfidf'])
-    ARGS = PARSER.parse_args()
 
-    experiment(pd.read_csv(util.TEST_CSV), pd.read_csv(util.TRAIN_CSV),
-               ARGS.weight_func)
+    logging.info('reading news from %s', parse.NEWS_JSON)
+    with open(parse.NEWS_JSON) as j:
+        news_json = json.load(j)
+
+#    logging.info('testing with lewissplit')
+#    test_lewis()
+
+    logging.info('testing with random split')
+    test_random()
