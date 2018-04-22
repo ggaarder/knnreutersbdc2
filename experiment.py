@@ -26,6 +26,8 @@ def similarity(doc1, doc2, cache, wfunc):
 
     if wfunc == 'tfidf':
         weights = [float(cache[cache.term == t]['idf']) for t in terms]
+    elif wfunc == 'tfbdc':
+        weights = [float(cache[cache.term == t]['bdc']) for t in terms]
 
     doc1vec = [doc1vec.get_tf(terms[i])*weights[i] for i in range(len(terms))]
     doc2vec = [doc2vec.get_tf(terms[i])*weights[i] for i in range(len(terms))]
@@ -69,7 +71,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     PARSER = argparse.ArgumentParser()
     PARSER.add_argument("-w", "--weight-func", type=str,
-                        default='tfidf',
+                        default='tfbdc',
                         choices=['tfbdc', 'tfidf'])
     ARGS = PARSER.parse_args()
 

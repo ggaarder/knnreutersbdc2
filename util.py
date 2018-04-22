@@ -1,3 +1,5 @@
+"""utilities"""
+# pylint: disable=C0304
 import algo
 
 CACHE_FILE = 'dat/neuters_terms_cache.csv'
@@ -6,8 +8,9 @@ TRAIN_CSV = 'dat/train-8-categories.csv'
 EXPERIMENT_FILE = 'experiment.csv'
 
 def all_terms(train):
-    all_terms = set()
+    """return all terms of a train data"""
+    terms = set()
     for i in train['doc']:
-        all_terms |= frozenset(algo.DocVector(i).terms)
+        terms |= frozenset(algo.DocVector(i).terms)
 
-    return sorted(all_terms)
+    return sorted(terms)
