@@ -106,7 +106,7 @@ def test_random():
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
-    with open(parse.NEWS_JSON) as j:
+    with open(OUT_JSON) as j:
         news_json = json.load(j)
 
     logging.info('testing with lewissplit')
