@@ -20,16 +20,17 @@ def similarity(doc1, doc2, cache, wfunc):
     terms = sorted(terms)
 
     if wfunc == 'tfidf':
-        w = [cache[cache.term == t].loc[0, 'idf'] for t in terms]
+        w = [float(cache[cache.term == t]['idf']) for t in terms]
 
-    doc1vec = [doc1vec1.get_tf(terms[i])*w[i] for i in range(len(terms))]
-    doc2vec = [doc2vec2.get_tf(terms[i])*w[i] for i in range(len(terms))]
+    doc1vec = [doc1vec.get_tf(terms[i])*w[i] for i in range(len(terms))]
+    doc2vec = [doc2vec.get_tf(terms[i])*w[i] for i in range(len(terms))]
 
-    return algo.Vector(doc1vec, doc2vec).cos()
+    return algo.Vector(doc1vec).cos(algo.Vector(doc2vec))
 
 def predict(doc, train, cache, wfunc):
     return algo.knn([
-        [train[i,'label'], similarity(doc, train[i,'doc'], cache, wfunc)]
+        [train.loc[i,'label'],
+         similarity(doc, train.loc[i,'doc'], cache, wfunc)]
         for i in range(len(train))])
 
 def experiment(test, train, wfunc):
@@ -40,12 +41,12 @@ def experiment(test, train, wfunc):
     out.write('actual,expect\n')
 
     for i in range(len(test)):
-        expect.append(test[i, 'label'])
-        actual.append(predict(test[i, 'doc'], train, cache, wfunc))
+        expect.append(test.loc[i, 'label'])
+        actual.append(predict(test.loc[i, 'doc'], train, cache, wfunc))
 
         logging.info('#{}: {}'.format(i, algo.accuracy(actual, expect)))
 
-        out.write('{},{}\n', expect[-1], actual[-1])
+        out.write('{},{}\n', actual[-1], expect[-1])
         out.flush()
 
     out.close()
@@ -65,7 +66,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument("-w", "--weight-func", type=str,
-        default='tfbdc',
+        default='tfidf',
         choices=['tfbdc', 'tfidf'])
     args = parser.parse_args()
 
