@@ -1,34 +1,61 @@
 import argparse
 import logging
 import sys
-import reuters_util as util
-
+import pandas as pd
+import algo
+import util
 """
 Text Classification
 Train/Test: Neuters 21578 LEWISSPLIT
 Method: KNN, bdc
 todo:
-- remove small topics (only the eight on in the paper)
 - the accuracy should at ~ 94%
 - SVM
 """
 
-def test_classify(testcorpus, traincorpus, wfunc):
-    """return the predicted results list"""
-    correct_cnt = 0
+def similarity(doc1, doc2, cache, wfunc):
+    doc1vec, doc2vec = algo.DocVector(doc1), algo.DocVector(doc2)
 
-    for i, d in enumerate(testcorpus.DOCVECS):
-        result = traincorpus.predict_with_knn(5, d, wfunc)
+    terms = set(doc1vec.terms) & set(doc2vec.terms) & set(cache['term'])
+    terms = sorted(terms)
 
-        if result == d.label:
-            correct_cnt += 1
+    if wfunc == 'tfidf':
+        w = [cache[cache.term == t].loc[0, 'idf'] for t in terms]
 
-        logging.info('#{}: {}'.format(i, correct_cnt/(i+1)))
+    doc1vec = [doc1vec1.get_tf(terms[i])*w[i] for i in range(len(terms))]
+    doc2vec = [doc2vec2.get_tf(terms[i])*w[i] for i in range(len(terms))]
 
-#        if i % 100:
-#            traincorpus.write_cache_file()
+    return algo.Vector(doc1vec, doc2vec).cos()
 
-        yield result
+def predict(doc, train, cache, wfunc):
+    return algo.knn([
+        [train[i,'label'], similarity(doc, train[i,'doc'], cache, wfunc)]
+        for i in range(len(train))])
+
+def experiment(test, train, wfunc):
+    cache = pd.read_csv(util.CACHE_FILE)
+    actual, expect = [], []
+
+    out = open(util.EXPERIMENT_FILE, 'w')
+    out.write('actual,expect\n')
+
+    for i in range(len(test)):
+        expect.append(test[i, 'label'])
+        actual.append(predict(test[i, 'doc'], train, cache, wfunc))
+
+        logging.info('#{}: {}'.format(i, algo.accuracy(actual, expect)))
+
+        out.write('{},{}\n', expect[-1], actual[-1])
+        out.flush()
+
+    out.close()
+
+    logging.info('Experiment success')
+    logging.info('Weight Function: {}'.format(wfunc))
+    logging.info('Accuracy: {}'.format(algo.accuracy(actual, expect)))
+    logging.info('Micro F1: {}'.format(algo.micro_f1(actual, expect)))
+    logging.info('Macro F1: {}'.format(algo.macro_f1(actual, expect)))
+    logging.info('Result saved to {}'.format(util.EXPERIMENT_FILE))
 
 if __name__ == '__main__':
     """
@@ -40,25 +67,7 @@ if __name__ == '__main__':
     parser.add_argument("-w", "--weight-func", type=str,
         default='tfbdc',
         choices=['tfbdc', 'tfidf'])
-    parser.add_argument("-o", "--output", type=str)
     args = parser.parse_args()
 
-    TRAINCSV = 'dat/train.csv'
-    TESTCSV = 'dat/test.csv'
-
-    traincorpus = util.csv2corpus(TRAINCSV)
-    testcorpus = util.csv2corpus(TESTCSV)
-
-    results = test_classify(testcorpus, traincorpus, args.weight_func)
-
-    if args.output:
-        out_fp = open(args.output, 'w')
-    else:
-        out_fp = sys.stdout
-
-    for result in results:
-        out_fp.write(result+'\n')
-        out_fp.flush()
-
-    if out_fp != sys.stdout:
-        out_fp.close()
+    experiment(pd.read_csv(util.TEST_CSV), pd.read_csv(util.TRAIN_CSV),
+        args.weight_func)
