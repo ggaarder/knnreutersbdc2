@@ -200,7 +200,7 @@ def x_logx(x):
     if x != 0: return x*math.log2(x)
     return 0
 
-def distance_to(v1, v2):
+def vector_distance(v1, v2):
     """
     to compare two vectors, using cosine_similarity instead of this can get
     better performance while the error is very little.
@@ -210,8 +210,26 @@ def distance_to(v1, v2):
     """
     return math.sqrt(sum([(x1-x2)*(x1-x2) for x1, x2 in zip(v1, v2)]))
 
+def inner_product(v1, v2):
+    return sum([x1*x2 for x1, x2 in zip(v1, v2)])
+
+def vector_abs(v, cache={}):
+    v_hash = repr(v)
+
+    if v_hash not in cache:
+        cache[v_hash] = math.sqrt(sum([i*i for i in v]))
+
+    return cache[v_hash]
+
 def cosine_similarity(v1, v2):
-    """not tested :-)"""
+    return inner_product(v1, v2)/vector_abs(v1)/vector_abs(v2)
+
+def vector_similarity(v1, v2):
+#    try:
+#        return cosine_similarity(v1, v2)
+#    except ZeroDivisionError:
+#        return 999999999 # TODO
+    return vector_distance(v1, v2)
 
 def get_majority(votes):
     """get_majority([1, 2, 2, 1, 2, 3]) -> 2"""
@@ -225,12 +243,12 @@ def get_k_nearest_neighbors(knn_k_value, v, vx, labels):
     vx for train: {[label, vec]}
     todo: divide-and-conquer optimize (see Introduction to Algorithms)
     """
-    logging.info('Calculating distances ...')
-    distances = list(enumerate([distance_to(v, vv) for vv in vx]))
+    logging.info('Calculating similarities')
+    similarities = list(enumerate([vector_similarity(v, vv) for vv in vx]))
 
-    logging.info('Sorting distances ...')
+    logging.info('Sorting similarities')
     sorted_neighbors = [i
-        for [i, _] in sorted(distances, key=operator.itemgetter(1))]
+        for [i, _] in sorted(similarities, key=operator.itemgetter(1))]
 
     return sorted_neighbors[:knn_k_value]
 
@@ -242,19 +260,97 @@ def knn_classify(knn_k_value, v, vx, labels):
 
     return get_majority([labels[i] for i in neighbors])
 
-def exam(testcorpus, traincorpus):
-    """return correct_cnt, all_question_cnt"""
-    correct_cnt, quiz_sum = 0, 0
+def test_classify(testcorpus, traincorpus):
+    """return the predicted results list"""
+    results = []
+    correct_cnt = 0
 
-    for d in testcorpus.DOCVECS:
-        quiz_sum += 1
-        logging.info('Quiz #{}'.format(quiz_sum))
+    for i, d in enumerate(testcorpus.DOCVECS):
+        logging.info('Quiz #{} (accuracy {})'.format(i, correct_cnt/i))
+        results.append(train.predict_with_knn(5, d))
 
-        if traincorpus.predict_with_knn(5, d) == d.label:
+        if results[-1] == d.label:
             correct_cnt += 1
-            logging.info('Correct: {}'.format(correct_cnt))
+
+    return results
+
+def simple_exam(results):
+    """return correct_cnt, all_question_cnt"""
+    correct_cnt = len([None for i, result in enumerate(results)
+        if result == traincorpus.DOCVECS[i].label])
+    quiz_sum = len(results)
 
     return correct_cnt, quiz_sum
+
+def macro_micro_f1(results, correct_results):
+    """
+    see bdc [17]: Beyond tfidf weighting for text categorization in the vector
+    space model.
+    Pascal Soucy and Guy W Mineau. In IJCAI, volume 5, pages 1130–1135, 2005.
+    """
+
+    def f1(c):
+        """
+        bdc[17]:
+        ---------------------------------------------------------------
+                              Classifier      Classifier
+                             positive label  negative label
+        True positive label       A               B
+        True negative label       C               D
+
+        For any category, the classifier precision is defined as A/(A+C) and
+        the recall as A/(A+B).
+
+        F1 = (p+r)/(2*p*r)
+        -----------------------------------------------------------------------"""
+        def ABCD_cnt(c):
+            """A, B, C, D for category c"""
+            answers_and_keys = zip(results, correct_results)
+
+            # True Positive and classifier Positive
+            A_cnt = len([None
+                for i, [resu, corr] in enumerate(answers_and_keys)
+                if corr == c and resu == c ])
+
+            # True Positive and Classifier Negative
+            B_cnt = len([None
+                for i, [resu, corr] in enumerate(answers_and_keys)
+                if corr == c and resu != c ])
+
+            # True Negative and Classifier Positive
+            C_cnt = len([None
+                for i, [resu, corr] in enumerate(answers_and_keys)
+                if corr != c and resu == c ])
+
+            # True Negative and Classifier Negative
+            D_cnt = len([None
+                for i, [resu, corr] in enumerate(answers_and_keys)
+                if corr != c and resu != c ])
+
+        def precison_recall(A_cnt, B_cnt, C_cnt, D_cnt):
+            return A_cnt/(A_cnt+C_cnt), A_cnt/(A_cnt+B_cnt)
+
+        p, r = precision_recall(*ABCD_cnt(c))
+
+        return (p+r)/(2*p*r)
+
+    if len(results) != len(correct_results): raise LookupError()
+
+    categories = sorted(set(correct_results))
+    f1s = [f1(c) for c in categories]
+    macro_f1 = sum(f1s)/len(f1s)
+
+    # todo: really in this way?
+    # I don't know the exact formula. Just according to bdc[17], I got that
+    # one below. It is correct?
+    #
+    # bdc[17]: the micro-F1 average weighs large categories more than smaller
+    # ones
+    f1s_weighted = [ f1s[categories.index(c)]*correct_results.count(c)
+        for c in categories]
+    micro_f1 = sum(f1s_weighted)/len(f1s_weighted)
+
+    return macro_f1, micro_f1
 
 if __name__ == '__main__':
     """
@@ -268,4 +364,7 @@ if __name__ == '__main__':
     traincorpus = csv2corpus(TRAINCSV)
     testcorpus = csv2corpus(TESTCSV)
 
-    print('ACCURACY: {}'.format(operator.truediv(*exam(testcorpus, traincorpus))))
+    results = test_classify(testcorpus, traincorpus)
+    print('ACCURACY: {}'.format(operator.truediv(*simple_exam(results))),
+        'Macro, Micro F1: {}, {}',format(*macro_micro_f1(results,
+            [d.label for d in testcorpus.DOCVECS])))
