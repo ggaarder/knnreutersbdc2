@@ -40,21 +40,18 @@ def clean_doc(doc):
     doc = re.sub(r'\s+', ' ', doc)
     doc = re.sub(r'^\s+', '', doc)
     doc = re.sub(r'\s$', '', doc)
-    return doc
+    return doc.lower()
 
-def parse_one_sgm(sgmfileno):
-    logging.info('Parsing {}'.format(sgmfileno))
-
-    sgmfilename = r'C:\Users\01\Desktop\reu\reut2-{:03d}.sgm'.format(sgmfileno)
-    with codecs.open(sgmfilename, encoding='utf-8',
-        errors='backslashreplace') as f:
-        reutdat = f.read()
-
+def parse_one_sgm(reutdat):
     soup = BeautifulSoup(reutdat, 'html.parser')
     reuters = soup.find_all('reuters')
 
     for i in range(len(reuters)):
         reuter = reuters[i]
+        split = reuter['lewissplit']
+
+        if split not in ['TRAIN', 'TEST']:
+            continue
 
         topic = get_topic(reuter)
         if topic == 'NO TOPICS' or topic == 'MULTI TOPICS':
@@ -64,12 +61,26 @@ def parse_one_sgm(sgmfileno):
         if not doc:
             continue
 
-        yield reuter['lewissplit'], '{},"{}"\n'.format(topic, clean_doc(doc))
+        yield split, topic, clean_doc(doc)
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    outfile = 'out.csv'
 
-    with open(outfile, 'w') as out:
-        for i in range(0, 1):
-            for lewissplit, parse_one_sgm(i, out)
+    with open('train.csv', 'w') as trainout, open('test.csv', 'w') as testout:
+        for i in range(0, 22):
+            logging.info('Parsing {}'.format(i))
+
+            sgmfilename = r'C:\Users\01\Desktop\reu\reut2-{:03d}.sgm'.format(i)
+            with codecs.open(sgmfilename, encoding='utf-8',
+                errors='backslashreplace') as f:
+                reutdat = f.read()
+
+            for lewissplit, topic, doc in parse_one_sgm(reutdat):
+                csvline = '{},{}\n'.format(topic, doc)
+
+                if lewissplit == 'TRAIN':
+                    trainout.write(csvline)
+                elif lewissplit == 'TEST':
+                    testout.write(csvline)
+                elif lewissplit != 'NOT-USED':
+                    logging.warning('Unknown lewissplit {}'.format(lewissplit))
