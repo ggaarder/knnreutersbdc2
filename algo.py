@@ -1,3 +1,4 @@
+"""miscellaneous algorithms"""
 import math
 import operator
 from operator import itemgetter
@@ -5,16 +6,20 @@ import sys
 import pandas as pd
 
 class Vector:
+    """vector"""
     def __init__(self, v):
         self.v = v
 
     def inner_product(self, v):
+        """dot product"""
         return sum(map(operator.mul, self.v, v.v))
 
     def abs(self):
+        """abs"""
         return math.sqrt(sum(map(lambda x:x**2, self.v)))
 
     def cos(self, v):
+        """cosine"""
         E = sys.float_info.epsilon
         return self.inner_product(v)/(E+self.abs())/(E+v.abs())
 
@@ -30,19 +35,50 @@ class DocVector:
         """term frequency"""
         return self.tf.get(term, 0)
 
+class Corpus:
+    """set of DocVector"""
+    def __init__(self, dat):
+        """dat is pandas DataFrame"""
+        self.DAT = dat
+        self.TERMS = self.all_terms()
+        self.CATEGORIES = sorted(set(self.DAT['label']))
+        self.DOCVECS = self.docvecs()
+
+    def docvecs(self):
+        """
+        split by categories
+        a great optimization (test v6, which calculates bdc ~ 2sec/word because
+        it calls DocVector everytime it encounters a term)
+        """
+        c = self.CATEGORIES
+        return [[DocVector(d) for d in self.DAT[self.DAT.label == c[i]]['doc']]
+                for i in range(len(c))]
+
+    def all_terms(self):
+        """return all terms of a train data"""
+        terms = set()
+        for i in self.DAT['doc']:
+            terms |= frozenset(DocVector(i).terms)
+
+        return sorted(terms)
+
 def avg(l):
+    """average"""
     return sum(l)/len(l)
 
 def x_logx(x):
+    """0log0 = 0"""
     if x == 0: return 0
     return x*math.log2(x)
 
 def majority(votes):
+    """vote"""
     labels = frozenset(votes)
     counts = [votes.count(l) for l in labels]
     return max(zip(counts, labels), key=itemgetter(0))[1]
 
 def partition(A, key=lambda x: x):
+    """Quicksort Partition"""
     p, r = 0, len(A)-1
     x, i = key(A[r]), p-1
 

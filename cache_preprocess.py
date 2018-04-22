@@ -10,24 +10,20 @@ import util
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     train = pd.read_csv(util.TRAIN_CSV)
+    corpus = algo.Corpus(train)
 
     try:
         cache = pd.read_csv(util.CACHE_FILE)
     except FileNotFoundError:
         cache = pd.DataFrame(
-            [[i, np.nan, np.nan, np.nan] for i in util.all_terms(train)],
+            [[i, np.nan, np.nan, np.nan] for i in corpus.TERMS],
             columns=['term', 'df', 'idf', 'bdc'])
 
-    c = sorted(set(train['label'])) # categories
+    c = corpus.CATEGORIES
+    docvecs = corpus.DOCVECS
     f_ci = [sum([len(d.split(' '))
                  for d in train[train.label == c[i]]['doc']])
             for i in range(len(c))]
-
-    # split by categories
-    # a great optimization (test v7, which calculates bdc ~ 2sec/word because
-    # it calls DocVector everytime it encounters a term)
-    docvecs = [[algo.DocVector(d) for d in train[train.label == c[i]]['doc']]
-               for i in range(len(c))]
 
     for i, t in enumerate(cache['term']):
         if pd.isna(cache.loc[i, 'df']):
