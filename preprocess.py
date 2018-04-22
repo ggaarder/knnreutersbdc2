@@ -1,7 +1,9 @@
 import logging
 import os
+import re
 import json
-import string
+import pickle
+import itertools
 from gzip import GzipFile
 from bs4 import BeautifulSoup as bs
 import numpy as np
@@ -16,10 +18,11 @@ STEMMER = nltk.stem.LancasterStemmer()
 TOPICS_WHITELIST = [ 'earn', 'acq', 'trade', 'ship', # see the bdc paper
                      'grain', 'crude', 'interest', 'money-fx']
 RARE_TERMS_LINE = 100 # terms appears less than ___ times will be ignored
+STAGE1_PICKLE = 'preprocessed.stage1.pickle'
 
 def parse(news_soup):
     if len(news_soup.topics.find_all('d')) != 1 or news_soup.topics.d.string not in TOPICS_WHITELIST:
-        continue
+        raise
             
     news = {
         'topic': news_soup.topics.d.string,
@@ -36,19 +39,22 @@ def parse(news_soup):
     news['tf'] = {t: doc.count(t) for t in sorted(set(doc))}
 
     return news
-    
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+
+def stage1():
     with GzipFile(REUTERS_TGZ) as gz:
-        raw_SGML = str([ch for ch in gz.read() if ch in string.printable])
-    soup = bs(raw_SGML, 'xml.parser').reuters
+        raw_SGML = str(gz.read())
     all_terms = set()
     all_topics = sorted(TOPICS_WHITELIST)
     all_news = []
     
-    for i, news_soup in enumerate(soup):
+    for i in itertools.count(1):
         logging.info('%d', i)
+        m = re.match(r'.+?(<REUTERS.+?</REUTERS>)', raw_SGML)
+        if not m:
+            break
+        raw_SGML = raw_SGML[m.end():]
         try:
+            news_soup = bs(m.groups()[0], 'html.parser').reuters
             news = parse(news_soup)
         except:
             continue
@@ -59,8 +65,22 @@ if __name__ == '__main__':
     all_terms = [t for t in sorted(all_terms)
                  if sum([news['tf'].get(t, 0)
                          for news in all_news]) > RARE_TERMS_LINE]
+
+    with open(STAGE1_PICKLE, 'w') as o:
+        pickle.dump([all_terms, all_topics, all_news], o)
+    
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+
+    if not os.path.exists(STAGE1_PICKLE):
+        stage1()
+
+    with open(STAGE1_PICKLE) as r:
+        all_terms, all_topics, all_news = pickle.load(r)
+        
     for news in all_news:
-        for t in news['tf'].keys():
+        terms = list(news['tf'].keys())
+        for t in terms:
             if t not in all_terms:
                 del news['tf'][t]
     
