@@ -12,11 +12,24 @@ Method: KNN, bdc
 todo: SVM, tf*bdc, idf, etc.
 """
 
+BDC_CACHE_FILE = 'bdc.cache'
+
+def load_bdc_cache():
+    # logging.info('Reading bdc cache')
+    return {t: b for t, b in read_csv(BDC_CACHE_FILE)}
+
+def write_bdc_cache(cache):
+    # logging.info('Writing bdc cache')
+    csvcache = '\n'.join(['{},{}'.format(t, cache[t])
+        for t in sorted(cache.keys())])
+    with open(BDC_CACHE_FILE, 'w') as o:
+        o.write(csvcache)
+
 class DocVector:
     """VSM"""
     def __init__(self, doc, label):
         terms = sorted(doc.split(' '))
-        self.terms = list(frozenset(terms))
+        self.terms = sorted(list(frozenset(terms)))
         self.tf = [terms.count(t) for t in self.terms] # term frequency
         self.label = label
 
@@ -31,18 +44,24 @@ class Corpus:
     """immutable set of Doc Vectors"""
     def __init__(self, docvecs):
         """preprocess for calculating bdc"""
-        self.bdc_cache = {}
         self.DOCVECS = docvecs
         self.CATEGORIES = None
         self.ALL_TERMS = None
         self.f_ci_cache = None
         self.bdc_cache = None
+        self.select_by_category_cache = None
+        self.bdc_cache = load_bdc_cache()
 
     def terms(self):
         """{t_i}"""
         if not self.ALL_TERMS:
-            self.ALL_TERMS = list(frozenset(sorted(set(itertools.chain(
-                [set(docvec.terms) for docvec in self.DOCVECS])))))
+            self.ALL_TERMS = set()
+
+            for d in self.DOCVECS:
+                for t in d.terms:
+                    self.ALL_TERMS.add(t)
+
+            self.ALL_TERMS = sorted(list(self.ALL_TERMS))
 
         return self.ALL_TERMS
 
@@ -68,7 +87,13 @@ class Corpus:
         return self.f_ci_cache[self.categories().index(c)]
 
     def select_by_category(self, category):
-        return [d for d in self.DOCVECS if category == d.label]
+        if not self.select_by_category_cache:
+            self.select_by_category_cache = [
+                [d for d in self.DOCVECS if c == d.label]
+                for c in self.categories()
+            ]
+
+        return self.select_by_category_cache[self.categories().index(category)]
 
     def f_t_ci(self, term, category):
         """f(t, c_i) = frequency of term t in category c_i"""
@@ -96,7 +121,7 @@ class Corpus:
 
     def bdc(self, term):
         """bdc(t) = 1 - BH(t)/log(|C|)"""
-        logging.info('Calculating bdc for {}'.format(term))
+        # logging.info('Calculating bdc for {}'.format(term))
 
         if not self.bdc_cache:
             self.bdc_cache = {}
@@ -106,14 +131,21 @@ class Corpus:
             self.bdc_cache[term] = 1 - self.BH_t(term)/math.log2(abs_C)
 
         b = self.bdc_cache[term]
-        logging.info('bdc({}): {}'.format(term, b))
+        # logging.info('bdc({}): {}'.format(term, b))
         return b
 
     def predict_with_knn(self, knn_k_value, d):
         """
         return d's predicted label
         """
-        dw = [d.get_tf(t)*self.bdc(t) for t in d.terms] # weighted copy
+        logging.info('Predicting'.format())
+
+        # remove terms that in the test-corpus however not in train-corpus
+        whitelst = [t for t in d.terms if t in self.terms()]
+
+        dw = [d.get_tf(t)*self.bdc(t) for t in whitelst] # weighted copy
+
+        write_bdc_cache(self.bdc_cache)
 
         """
         weighted vectors of train data
@@ -121,10 +153,12 @@ class Corpus:
             docvec_to_predict
         1. weight with bdc
         """
-        twv = [[doc.get_tf(t)*self.bdc(t) for t in d.terms]
-            for doc in self.DATS]
+        twv = [[doc.get_tf(t)*self.bdc(t) for t in whitelst]
+            for doc in self.DOCVECS]
 
-        labels = [d.label for d in self.DATS]
+        write_bdc_cache(self.bdc_cache)
+
+        labels = [d.label for d in self.DOCVECS]
 
         return knn_classify(5, dw, twv, labels)
 
@@ -149,7 +183,7 @@ def x_logx(x):
 
 def distance_to(v1, v2):
     """todo: Cosine simplify?"""
-    return math.sqrt(sum([(x1-x2)*(x1-x2) for x1, x2 in zip(v1.vec, v2.vec)]))
+    return math.sqrt(sum([(x1-x2)*(x1-x2) for x1, x2 in zip(v1, v2)]))
 
 def get_majority(votes):
     """get_majority([1, 2, 2, 1, 2, 3]) -> 2"""
@@ -176,7 +210,7 @@ def knn_classify(knn_k_value, v, vx, labels):
     """
     note: preprocessed before
     """
-    neighbors = get_k_nearest_neighbors(knn_k_value, v, vx)
+    neighbors = get_k_nearest_neighbors(knn_k_value, v, vx, labels)
 
     return get_majority([labels[i] for i in neighbors])
 
