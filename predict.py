@@ -222,14 +222,19 @@ def vector_abs(v, cache={}):
     return cache[v_hash]
 
 def cosine_similarity(v1, v2):
-    return inner_product(v1, v2)/vector_abs(v1)/vector_abs(v2)
+    try:
+        return inner_product(v1, v2)/vector_abs(v1)/vector_abs(v2)
+    except DividedByZeroError:
+        v1x, v2x = v1+[1], v2+[1] # todo: is this workaround the best?
+        return inner_product(v1x, v2x)/vector_abs(v1x)/vector_abs(v2x)
 
 def vector_similarity(v1, v2):
-#    try:
-#        return cosine_similarity(v1, v2)
-#    except ZeroDivisionError:
-#        return 999999999 # TODO
-    return vector_distance(v1, v2)
+    USE_COSINE = True
+
+    if USE_COSINE:
+        return cosine_similarity(v1, v2)
+    else:
+        return vector_distance(v1, v2)
 
 def get_majority(votes):
     """get_majority([1, 2, 2, 1, 2, 3]) -> 2"""
@@ -266,11 +271,12 @@ def test_classify(testcorpus, traincorpus):
     correct_cnt = 0
 
     for i, d in enumerate(testcorpus.DOCVECS):
-        logging.info('Quiz #{} (accuracy {})'.format(i, correct_cnt/i))
-        results.append(train.predict_with_knn(5, d))
+        results.append(traincorpus.predict_with_knn(5, d))
 
         if results[-1] == d.label:
             correct_cnt += 1
+
+        logging.info('Quiz #{} Accuracy {}'.format(i, correct_cnt/(i+1)))
 
     return results
 
