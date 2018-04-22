@@ -51,6 +51,7 @@ class Corpus:
         self.bdc_cache = None
         self.select_by_category_cache = None
         self.bdc_cache = load_bdc_cache()
+        self.f_t_ci_cache = None
 
     def terms(self):
         """{t_i}"""
@@ -96,8 +97,26 @@ class Corpus:
         return self.select_by_category_cache[self.categories().index(category)]
 
     def f_t_ci(self, term, category):
-        """f(t, c_i) = frequency of term t in category c_i"""
-        return sum([d.get_tf(term) for d in self.select_by_category(category)])
+        """
+        f(t, c_i) = frequency of term t in category c_i
+
+        cache because
+           478276    0.926    0.000  101.256    0.000 predict.py:98(f_t_ci)
+        f_t_ci = f_t_ci_cache[i][t]
+        """
+        if not self.f_t_ci_cache:
+            self.f_t_ci_cache = [None] * len(self.categories())
+
+        i = self.categories().index(category)
+        if not self.f_t_ci_cache[i]:
+            self.f_t_ci_cache[i] = {}
+
+        if term not in self.f_t_ci_cache[i]:
+            r = sum([d.get_tf(term)
+                for d in self.select_by_category(category)])
+            self.f_t_ci_cache[i][term] = r
+
+        return self.f_t_ci_cache[i][term]
 
     def p_t_ci(self, term, category):
         """p(t|c_i) = f(t, c_i) / f(c_i)"""
