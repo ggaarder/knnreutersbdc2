@@ -2,7 +2,6 @@ import logging
 import os
 import re
 import json
-import pickle
 import itertools
 from gzip import GzipFile
 from bs4 import BeautifulSoup as bs
