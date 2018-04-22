@@ -1,59 +1,16 @@
+import copy
 import csv
 import math
 import logging
 import operator
+import itertools
 
 """
 Text Classification
-Train/Test: Neuters 21578
+Train/Test: Neuters 21578 LEWISSPLIT
 Method: KNN, bdc
 todo: SVM, tf*bdc, idf, etc.
 """
-
-class docvec:
-    """BOW"""
-    def __init__(self, doc):
-        """bow will be sorted in key since words is sorted"""
-        words = sorted(doc.split(' '))
-        self.bow = {word: words.count(word) for word in words}
-
-    def get_tf(self, term):
-        """
-        term frequency
-        return a term's count of a docvec
-        """
-        return self.bow[term]
-
-    def get_terms(self):
-        """return a set"""
-        return self.bow.keys()
-
-    def get_vec(self):
-        """return the vector"""
-        return list(self.bow.values())
-
-    def mult_weight(self, vec, weight):
-        """multed_i = vec_i * w_i"""
-        if len(weight) != len(self.bow):
-            raise IndexError('len(weight) != len(bow)')
-
-        for i, key in enumerate(dict):
-            dict[key] *= weight[i]
-
-    def strip_unused_terms(self, whitelist):
-        """strip terms not in whitelist"""
-        self.bow = {term: self.bow[term] for term in self.bow
-            if term in whitelist}
-
-    def distance_to(self, v):
-        """
-        todo: Cosine simplify?
-        """
-        return math.sqrt(sum([(x1-x2)*(x1-x2)
-            for x1, x2 in zip(self.get_vec(), v.get_vec())]))
-
-class traindat:
-    """list of docvec"""
 
 def read_csv(csvfilename):
     """note: yield"""
@@ -67,43 +24,6 @@ def x_logx(x):
     if x != 0: return x*math.log2(x)
     return 0
 
-def calc_bdc(term, traindat):
-    """
-    bdc(t) = 1 - BH(t)/log(|C|)
-    |C| = the number of categories
-    BH(t) = -\sum{i=1}{|C|} F(t, c_i)
-    F(t, c_i) = G(t, c_i) log G(t, c_i)
-    G(t, c_i) = p(t|c_i)/(\sum_{i=1}{|C|} p(t|c_i))
-    p(t|c_i) = f(t, c_i) / f(c_i)
-    f(c_i) = frequency sum of all terms in category c_i
-    f(t, c_i) = frequency of term t in category c_i
-    """
-    categories = sorted(set([topic for [topic, docvec] in traindat]))
-    abs_C = len(categories)
-
-    docvecs_of_each_category = [
-        [docvec for category, docvec in traindat if category == c]
-        for c in categories]
-
-    f_ci = [
-        sum([calc_term_frequency_sum_of_all_terms(docvec)
-            for docvec in docvecs_in_this_category])
-        for docvecs_in_this_category in docvecs_of_each_category]
-
-    f_t_ci = [
-        sum([calc_term_frequency(term, docvec)
-            for docvec in docvecs_in_this_category])
-        for docvecs_in_this_category in docvecs_of_each_category]
-
-    p_t_ci = [f_t_ci[i]/f_ci[i] for i in range(abs_C)]
-    sum_p_t_ci = sum(p_t_ci)
-    G_t_ci = [p_t_ci[i]/sum_p_t_ci for i in range(abs_C)]
-    F_t_ci = [x_logx(G_t_ci[i]) for i in range(abs_C)]
-    BH_t = -sum(F_t_ci)
-    bdc = 1 - BH_t/math.log2(abs_C)
-
-    return bdc
-
 def get_majority(votes):
     """get_majority([1, 2, 2, 1, 2]) -> 2"""
     vote_dict = {label: votes.count(label) for label in votes}
@@ -111,48 +31,183 @@ def get_majority(votes):
     votes = list(vote_dict.values())
     return labels[votes.index(max(votes))]
 
-def knn_preprocess(docvec_to_predict, traindat):
-    """remove unused terms and weight terms of the doc vector"""
-    terms = generate_terms_lst(docvec_to_predict)
-    terms_bdc = [calc_bdc(i, traindat) for i in terms]
+def csv2traindat(csvfilename):
+    """csv -> Traindat"""
+    labels = []
+    docvecs = []
 
-    return mult_weight(docvec_to_predict, terms_bdc), [
-        [
-            label,
-            mult_weight(
-                strip_unused_terms_of_docvec(terms, docvec),
-                terms_bdc)
-        ] for [label, docvec] in traindat
-    ]
+    for label, doc in read_csv(csvfilename):
+        labels.append(label)
+        docvecs.append(Docvec(doc))
 
-def knn_get_k_nearest_neighbors(knn_k_value, testvec, traindat):
+    return Traindat(labels, docvecs)
+
+def get_k_nearest_neighbors(knn_k_value, vec_to_classify, traindat):
     """
     todo: divide-and-conquer optimize (see Introduction to Algorithms)
     """
-    numbered_distances = [[i, calc_distance(testvec, traindat[i][1])]
+    distances = [[i, vec_to_classify.distance_to(traindat[i][1])]
         for i in range(len(traindat))]
 
-    k_nearest_neighbors = [traindat[i]
-        for [i, _] in sorted(numbered_distances, key=operator.itemgetter(1))]
+    sorted_neighbors = [traindat[i]
+        for [i, _] in sorted(distances, key=operator.itemgetter(1))]
 
-    return k_nearest_neighbors[:knn_k_value]
+    return sorted_neighbors[:knn_k_value]
 
-def predict_with_knn(knn_k_value, docvec_to_predict, traindat):
-    """return a predicted topic"""
-    neighbors = knn_get_k_nearest_neighbors(knn_k_value,
-        *knn_preprocess(docvec_to_predict, traindat))
+def knn_classify(knn_k_value, vec_to_classify, traindat):
+    """note: preprocessed before"""
+    neighbors = get_k_nearest_neighbors(knn_k_value, vec_to_classify,
+        traindat)
 
     return get_majority([neighbor[0] for neighbor in neighbors])
+
+class Docvec:
+    """BOW"""
+    def __init__(self, doc):
+        if isinstance(doc, str):
+            """bow will be sorted in key since words is sorted"""
+            words = sorted(doc.split(' '))
+            self.bow = {word: words.count(word) for word in words}
+        else isinstance(doc, dict):
+            self.bow = doc
+
+    def get_term_frequency(self, term):
+        """
+        term frequency
+        return a term's count of a docvec
+        """
+        return self.bow.get(term, 0)
+
+    def get_sorted_terms(self):
+        """
+        not necessary to sort again since bow.keys() are sorted in __init___
+        """
+        return frozenset(self.bow.keys())
+
+    def get_vec(self):
+        """return the vector"""
+        return list(self.bow.values())
+
+    def mult_weight(self, weight):
+        """multed_i = vec_i * w_i"""
+        if len(weight) != len(self.bow):
+            raise IndexError('len(weight) != len(bow)')
+
+        for i, key in enumerate(dict):
+            dict[key] *= weight[i]
+
+    def weight_term(self, term, weight):
+        """weight a certain term"""
+        if term in self.bow:
+            self.bow[term] *= weight
+
+    def distance_to(self, v):
+        """
+        todo: Cosine simplify?
+        """
+        return math.sqrt(sum([(x1-x2)*(x1-x2)
+            for x1, x2 in zip(self.get_vec(), v.get_vec())]))
+
+class Traindat:
+    """{topic + docvec}"""
+    def __init__(self, labels, docvecs):
+        """
+        preprocess bdc
+        todo: tf, idf
+        """
+        self.bdc_cache = {}
+        self.DATS = zip(labels, docvecs) # note: immutable
+
+        # {t_i}
+        self.ALL_TERMS = frozenset(itertools.chain(
+            set([docvec.get_sorted_terms() for [label, docvec] in self.DATS])))
+
+        # {c_i}
+        self.CATEGORIES = frozenset(
+            sorted(set([label for [label, docvec] in self.DATS])))
+
+        # |C| = the number of categories
+        self.ABS_C = len(self.CATEGORIES)
+
+        # f(c_i) = frequency sum of all terms in category c_i
+
+        self.F_CI = {
+            category: sum([
+                len(docvec.get_sorted_terms())
+                for [label, docvec] in self.select_dat_by_category(category)
+            ])
+            for category in self.CATEGORIES
+        }
+
+    def select_dat_by_category(self, category):
+        """helper function"""
+        return [
+            [label, c] for [label, c] in self.dats
+            if c == category
+        ]
+
+    def calc_f_t_ci(self, term, category):
+        """f(t, c_i) = frequency of term t in category c_i"""
+        return sum([docvec.get_term_frequency(term)
+            for [label, docvec] in self.select_dat_by_category(category)])
+
+    def calc_p_t_ci(self, term, category):
+        """p(t|c_i) = f(t, c_i) / f(c_i)"""
+        return self.calc_f_t_ci(term, category) / self.F_CI[category]
+
+    def calc_sum_p_t_ci(self, term):
+        """\sum_{i=1}{|C|} p(t|c_i)"""
+        return sum([self.calc_p_t_ci(term, c) for c in self.CATEGORIES])
+
+    def calc_G_t_ci(self, term, category):
+        """G(t, c_i) = p(t|c_i)/(\sum_{i=1}{|C|} p(t|c_i))"""
+        return self.calc_p_t_ci(term, category) / self.calc_sum_p_t_ci(term)
+
+    def calc_F_t_ci(self, term, category):
+        """F(t, c_i) = G(t, c_i) log G(t, c_i)"""
+        return x_logx(self.calc_G_t_ci(term, category))
+
+    def calc_BH_t(self, term):
+        """BH(t) = -\sum{i=1}{|C|} F(t, c_i)"""
+        return -sum([self.calc_F_t_ci(term, c) for c in self.CATEGORIES])
+
+    def calc_bdc(self, term):
+        """bdc(t) = 1 - BH(t)/log(|C|)"""
+        if term not in self.bdc_cache:
+            bdc_cache[term] = 1 - self.calc_BH_t(term)/math.log2(abs_C)
+
+        return bdc_cache[term]
+
+    def predict_with_knn(knn_k_value, docvec_to_predict):
+        """
+        return a predicted label
+        """
+        terms_whitelist = docvec_to_predict.get_sorted_terms()
+
+        docvec_to_predict_weighted = copy.deep_copy(docvec_to_predict)
+
+        """
+        0. strip unused terms. only respect those terms occurs in
+            docvec_to_predict
+        1. weight with bdc
+        """
+        traindat_weighted = [
+            [ label,
+              { term: docvec.get_term_frequency(term) * self.calc_bdc(term)
+                for term in terms_whitelist } ]
+            for [label, docvec] in self.DATS]
+
+        return knn_classify(5, docvec_to_predict_weighted, traindat_weighted)
 
 def exam(testdat, traindat):
     """return correct_cnt, all_question_cnt"""
     correct_cnt, quiz_sum = 0, 0
 
-    for topic, docvec in testdat:
+    for [label, docvec] in testdat.DAT:
         quiz_sum += 1
         logging.info('Quiz #{}'.format(quiz_sum))
 
-        if topic == predict_with_knn(5, docvec, traindat):
+        if traindat.predict_with_knn(5, docvec) == topic:
             correct_cnt += 1
             logging.info('Correct: {}'.format(correct_cnt))
 
@@ -161,14 +216,14 @@ def exam(testdat, traindat):
 if __name__ == '__main__':
     """
     exam with TRAINCSV and TESTCSV, splited according to the LEWISSPLIT
-    attribution in <NEUTERS> in the original .sgm file
+    attribution in <NEUTERS> of the original .sgm file
     """
     logging.basicConfig(level=logging.INFO)
     TRAINCSV = 'train.csv'
     TESTCSV = 'test.csv'
 
-    traindat = [[topic, doc2vec(doc)] for topic, doc in read_csv(TRAINCSV)]
-    testdat = [[topic, doc2vec(doc)] for topic, doc in read_csv(TESTCSV)]
+    traindat = csv2traindat(TRAINCSV)
+    testdat = csv2traindat(TESTCSV)
 
     print('ACCURACY: {}'.format(
-        div(*exam(testdat, traindat))))
+        operator.div(*exam(testdat, traindat))))
