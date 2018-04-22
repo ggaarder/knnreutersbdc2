@@ -16,7 +16,7 @@ BDC_CACHE_FILE = 'bdc.cache'
 
 def load_bdc_cache():
     # logging.info('Reading bdc cache')
-    return {t: b for t, b in read_csv(BDC_CACHE_FILE)}
+    return {t: float(b) for t, b in read_csv(BDC_CACHE_FILE)}
 
 def write_bdc_cache(cache):
     # logging.info('Writing bdc cache')
