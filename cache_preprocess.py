@@ -23,14 +23,19 @@ if __name__ == '__main__':
                  for d in train[train.label == c[i]]['doc']])
             for i in range(len(c))]
 
+    # split by categories
+    # a great optimization (test v7, which calculates bdc ~ 2sec/word because
+    # it calls DocVector everytime it encounters a term)
+    docvecs = [[algo.DocVector(d) for d in train[train.label == c[i]]['doc']]
+               for i in range(len(c))]
+
     for i, t in enumerate(cache['term']):
         if pd.isna(cache.loc[i, 'df']):
             cache.loc[i, 'df'] = algo.count_if(train['doc'], lambda d: t in d)
         if pd.isna(cache.loc[i, 'idf']):
             cache.loc[i, 'idf'] = math.log(len(train)/cache.loc[i, 'df'])
         if pd.isna(cache.loc[i, 'bdc']):
-            f_t_ci = [sum([docvecs[i].get_tf(t)
-                           for d in train[train.label == c[i]]['doc']])
+            f_t_ci = [sum([d.get_tf(t) for d in docvecs[i]])
                       for i in range(len(c))]
             p_t_ci = [f_t_ci[i] / f_ci[i] for i in range(len(c))]
             G_t_ci = [p_t_ci[i] / sum(p_t_ci) for i in range(len(c))]
