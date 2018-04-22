@@ -100,9 +100,9 @@ class Corpus:
         """
         f(t, c_i) = frequency of term t in category c_i
 
-        cache because
+        cache because that according to profile:
            478276    0.926    0.000  101.256    0.000 predict.py:98(f_t_ci)
-        f_t_ci = f_t_ci_cache[i][t]
+        cache structure is f_t_ci = f_t_ci_cache[i][t]
         """
         if not self.f_t_ci_cache:
             self.f_t_ci_cache = [None] * len(self.categories())
@@ -201,8 +201,17 @@ def x_logx(x):
     return 0
 
 def distance_to(v1, v2):
-    """todo: Cosine simplify?"""
+    """
+    to compare two vectors, using cosine_similarity instead of this can get
+    better performance while the error is very little.
+
+    see http://cs.carleton.edu/cs_comps/0910/netflixprize/final_results/knn/
+    index.html
+    """
     return math.sqrt(sum([(x1-x2)*(x1-x2) for x1, x2 in zip(v1, v2)]))
+
+def cosine_similarity(v1, v2):
+    """not tested :-)"""
 
 def get_majority(votes):
     """get_majority([1, 2, 2, 1, 2, 3]) -> 2"""
