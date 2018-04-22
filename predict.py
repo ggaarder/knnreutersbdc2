@@ -1,35 +1,49 @@
 import csv
 import math
 import logging
-from operator import itemgetter
+import operator
+
+"""
+Text Classification
+Train/Test: Neuters 21578
+Method: KNN, bdc
+"""
 
 def read_csv(csvfilename):
+    """note: yield"""
     with open(csvfilename, newline='') as f:
         reader = csv.reader(f)
         for row in reader:
             yield row[0], row[1]
 
 def generate_terms_lst(docvec):
+    """return a set"""
     if len(docvec[0]) == 1:
         return sorted(set[[term for term in docvec]])
     elif len(docvec[0]) == 2:
         return sorted(set([term for [term, frequency] in docvec]))
 
 def calc_term_frequency_sum_of_all_terms(docvec):
+    """return the term count of a docvec"""
     return sum([frequency for [term, frequency] in docvec])
 
 def calc_term_frequency(term, docvec):
+    """return a term's count of a docvec"""
     for t, frequency in docvec:
         if t == term:
             return frequency
     return 0
 
 def x_logx(x):
+    """\lim_{i->0} 0logi -> 0, i.e. 0log0 = 0"""
     if x != 0: return x*math.log2(x)
     return 0
 
 def div(a, b):
-    """calc a/b"""
+    """
+    calc a/b,
+    we assume that 0/0 = 0 <------- TODO: Really???????????
+    """
     if a == 0: return 0
     return a/b
 
@@ -44,7 +58,6 @@ def calc_bdc(term, traindat):
     f(c_i) = frequency sum of all terms in category c_i
     f(t, c_i) = frequency of term t in category c_i
     """
-
     categories = sorted(set([topic for [topic, docvec] in traindat]))
     abs_C = len(categories)
 
@@ -72,18 +85,19 @@ def calc_bdc(term, traindat):
     return bdc
 
 def get_majority(votes):
+    """get_majority([1, 2, 2, 1, 2]) -> 2"""
     vote_dict = {label: votes.count(label) for label in votes}
     labels = list(vote_dict.keys())
     votes = list(vote_dict.values())
     return labels[votes.index(max(votes))]
 
 def mult_weight(vec, w):
-    if len(vec) != len(w): raise OverflowError(
-        'len(vec): {}, len(w): {}'.format(len(vec), len(w)))
-
-    return [vec[i]*w[i] for i in range(vec)]
+    """multed_i = vec_i * w_i"""
+    if len(vec) == len(w):
+        return list(itertools.starmap(operator.mul, zip(vec, w)))
 
 def strip_unused_terms_of_docvec(termslst, docvec):
+    """strip terms not in termslst"""
     return [term_tf for term_tf in docvec if term_tf[0] in termslst]
 
 def knn_preprocess(docvec_to_predict, traindat):
@@ -91,63 +105,68 @@ def knn_preprocess(docvec_to_predict, traindat):
     terms = generate_terms_lst(docvec_to_predict)
     terms_bdc = [calc_bdc(i, traindat) for i in terms]
 
-    docvec_to_predict_weighted = mult_weight(docvec_to_predict, terms_bdc)
+    return mult_weight(docvec_to_predict, terms_bdc), [
+        [
+            label,
+            mult_weight(
+                strip_unused_terms_of_docvec(terms, docvec),
+                terms_bdc)
+        ] for [label, docvec] in traindat
+    ]
 
-    train_docvecs_stripped_unused_terms = [
-        strip_unused_terms_of_docvec(terms, docvec)
-        for [label, docvec] in traindat]
+def calc_distance(a, b):
+    """todo: Cosine simplify?"""
+    return math.sqrt(sum([(x1-x2)*(x1-x2) for x1, x2 in zip(a, b)]))
 
-    train_docvecs_stripped_weighted = [
-        mult_weight(docvec, terms_bdc)
-        for docvec in train_docvecs_stripped_unused_terms]
+def knn_get_k_nearest_neighbors(knn_k_value, testvec, traindat):
+    """todo: optimize finding k-nearest with divide-and-conquer"""
+    numbered_distances = [[i, calc_distance(testvec, traindat[i][1])]
+        for i in range(len(traindat))]
 
-    traindat_stripped_weighted = [
-        [traindat[i][0], train_docvecs_stripped_weighted[i]]
-        for i in range(traindat)]
+    k_nearest_neighbors = [traindat[i]
+        for [i, _] in sorted(numbered_distances, key=operator.itemgetter(1))]
 
-    return docvec_to_predict_weighted, traindat_stripped_weighted
-
+    return k_nearest_neighbors[:knn_k_value]
 
 def predict_with_knn(knn_k_value, docvec_to_predict, traindat):
-    preprocessed_docvec_to_predict, preprocessed_traindat = knn_preprocess(
-        docvec_to_predict, traindat)
-
+    """return a predicted topic"""
     neighbors = knn_get_k_nearest_neighbors(knn_k_value,
-        preprocessed_docvec_to_predict, preprocessed_traindat)
+        *knn_preprocess(docvec_to_predict, traindat))
 
     return get_majority([neighbor[0] for neighbor in neighbors])
 
-def preprocess_csv(dat):
-    """vectorize"""
-    out = []
+def doc2vec(doc):
+    """BOW"""
+    words = sorted(doc.split(' '))
+    words_cnt = {word: words.count(word) for word in words}
 
-    for [topic, doc] in dat:
-        words = sorted(doc.split(' '))
-        vector = [[word, words.count(word)] for word in sorted(set(words))]
-        out.append([topic, vector])
-
-    return out
+    return zip(words_cnt.keys(), words_cnt.values())
 
 def exam(testdat, traindat):
+    """return correct_cnt, all_question_cnt"""
     correct_cnt, quiz_sum = 0, 0
 
     for topic, docvec in testdat:
         quiz_sum += 1
         logging.info('Quiz #{}'.format(quiz_sum))
 
-        if topic == predict_with_knn(docvec, traindat, knn_k_value=5):
+        if topic == predict_with_knn(5, docvec, traindat):
             correct_cnt += 1
             logging.info('Correct: {}'.format(correct_cnt))
 
-    return correct_cnt/quiz_sum
+    return correct_cnt, quiz_sum
 
 if __name__ == '__main__':
+    """
+    exam with TRAINCSV and TESTCSV, splited according to the LEWISSPLIT
+    attribution in <NEUTERS> in the original .sgm file
+    """
     logging.basicConfig(level=logging.INFO)
-    traincsv = 'train.csv'
-    testcsv = 'test.csv'
-    traindat = preprocess_csv(
-        [[topic, doc] for topic, doc in read_csv(traincsv)])
-    testdat = preprocess_csv(
-        [[topic, doc] for topic, doc in read_csv(testcsv)])
+    TRAINCSV = 'train.csv'
+    TESTCSV = 'test.csv'
 
-    print('ACCURACY: {}'.format(exam(testdat, traindat)))
+    traindat = [[topic, doc2vec(doc)] for topic, doc in read_csv(TRAINCSV)]
+    testdat = [[topic, doc2vec(doc)] for topic, doc in read_csv(TESTCSV)]
+
+    print('ACCURACY: {}'.format(
+        div(*exam(testdat, traindat))))
