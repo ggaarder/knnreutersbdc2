@@ -24,14 +24,6 @@ def get_terms(ids):
     return all_terms
 
 def test_general(testids, trainids):
-    """
-    We can't speed up since:
-    (1) We can't use multiprocessing to speed up, since calc_bdc used it and
-    Python doesn't allow a `daemon` (i.e. a forked processes) to `have
-    children`. (i.e. fork)
-    (2) We don't use threads since it doesn't speed up in our case, since
-    the task is CPU-bound.
-    """
     logging.info('test: %d, train: %d', len(testids), len(trainids))
 
     trainterms = get_terms(trainids)
@@ -114,12 +106,11 @@ def test_random():
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
-    logging.info('reading news from %s', parse.NEWS_JSON)
     with open(parse.NEWS_JSON) as j:
         news_json = json.load(j)
 
-#    logging.info('testing with lewissplit')
-#    test_lewis()
+    logging.info('testing with lewissplit')
+    test_lewis()
 
     logging.info('testing with random split')
     test_random()

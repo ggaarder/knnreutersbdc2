@@ -19,6 +19,7 @@ TOPICS_WHITELIST = [ 'earn', 'acq', 'trade', 'ship', # see the bdc paper
                      'grain', 'crude', 'interest', 'money-fx']
 RARE_TERMS_LINE = 100 # terms appears less than ___ times will be ignored
 STAGE1_PICKLE = 'preprocessed.stage1.pickle'
+STAGE2_PICKLE = 'preprocessed.stage2.pickle'
 
 def parse(news_soup):
     if len(news_soup.topics.find_all('d')) != 1 or news_soup.topics.d.string not in TOPICS_WHITELIST:
@@ -61,21 +62,24 @@ def stage1():
         all_terms |= frozenset(news['tf'].keys())
         all_news.append(news)
 
-    # remove rare terms
-    all_terms = [t for t in sorted(all_terms)
-                 if sum([news['tf'].get(t, 0)
-                         for news in all_news]) > RARE_TERMS_LINE]
-
-    with open(STAGE1_PICKLE, 'w') as o:
+    with open(STAGE1_PICKLE, 'wb') as o:
         pickle.dump([all_terms, all_topics, all_news], o)
-    
+        
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
     if not os.path.exists(STAGE1_PICKLE):
         stage1()
-
-    with open(STAGE1_PICKLE) as r:
+    with open(STAGE1_PICKLE, 'rb') as r:
+        all_terms, all_topics, all_news = pickle.load(r)
+    if not os.path.exists(STAGE2_PICKLE):
+        # remove rare terms
+        all_terms = [t for t in sorted(all_terms)
+                     if sum([news['tf'].get(t, 0)
+                             for news in all_news]) > RARE_TERMS_LINE]
+        with open(STAGE2_PICKLE, 'wb') as o:
+            pickle.dump([all_terms, all_topics, all_news], o)
+    with open(STAGE2_PICKLE, 'rb') as r:
         all_terms, all_topics, all_news = pickle.load(r)
         
     for news in all_news:
@@ -83,7 +87,9 @@ if __name__ == '__main__':
         for t in terms:
             if t not in all_terms:
                 del news['tf'][t]
-    
+    all_news = [news for news in all_news
+                if news['tf'].keys() != 0]
+                
     out_json = {
         'all_terms': all_terms,
         'all_topics': all_topics,
