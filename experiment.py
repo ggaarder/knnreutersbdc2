@@ -6,15 +6,11 @@ import logging
 import json
 import math
 import random
-import progressbar
 import numpy as np
 import pandas as pd
-import parse
+from preprocess import OUT_JSON
 from bdc import calc_bdc
 from knn import knn
-
-def cos(v1, v2):
-    return np.dot(v1, v2)/math.sqrt(np.sum(v1**2))/math.sqrt(np.sum(v2**2))
 
 def get_terms(ids):
     all_terms = set()
@@ -24,17 +20,15 @@ def get_terms(ids):
     return all_terms
 
 def test_general(testids, trainids):
+    def cosine(v1, v2):
+        return np.dot(v1, v2)/math.sqrt(np.sum(v1**2))/math.sqrt(np.sum(v2**2))
+        
     logging.info('test: %d, train: %d', len(testids), len(trainids))
 
     trainterms = get_terms(trainids)
 
     logging.info('experiment begins')
     correctcnt = 0
-    bar = progressbar.ProgressBar(
-        widgets=[progressbar.Percentage(),
-                 progressbar.Bar('>'),
-                 progressbar.DynamicMessage('accuracy')],
-        max_value=len(testids)).start()
     
     for no, testid in enumerate(testids):
         for n in news_json:
@@ -57,15 +51,15 @@ def test_general(testids, trainids):
             trainvec,
             index=trainlabels,
             columns=usedterms))
-        trainvec *= bdcs.T.values
-        testvec = bdcs.T.values*[testjson['tf'].get(t, 0) for t in usedterms]
-        sim = [cos(testvec, v) for v in trainvec]
+        trainvec *= bdcs.T.values[0]
+        testvec = bdcs.T.values[0]*[testjson['tf'].get(t, 0) for t in usedterms]
+        sim = [ cosine(v, testvec) for v in trainvec]
         knndat = [[trainlabels[i], sim[i]] for i in range(len(sim))]
         res = knn(5, knndat)
         
         if res == testjson['topic']:
             correctcnt += 1
-        bar.update(no+1, accuracy=correctcnt/(no+1))
+        logging.info('No: %d Ac: %f', no+1, correctcnt/(no+1))
 
     return correctcnt/len(testids)
         
@@ -75,11 +69,10 @@ def test_lewis():
     trainids = []
 
     for i in news_json:
-        if not i['reject']:
-            if i['lewissplit'] == 'TRAIN':
-                trainids.append(i['newid'])
-            elif i['lewissplit'] == 'TEST':
-                testids.append(i['newid'])
+        if i['lewissplit'] == 'TRAIN':
+            trainids.append(i['newid'])
+        elif i['lewissplit'] == 'TEST':
+            testids.append(i['newid'])
 
     return test_general(testids, trainids)
 
@@ -91,8 +84,6 @@ def test_random():
     trainids = []
 
     for i in news_json:
-        if i['reject']:
-            continue
         if len(i['tf'].keys()) < VALID_NEWS_TERMS_LOWER_BOUND:
             continue
 
@@ -107,8 +98,10 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
     with open(OUT_JSON) as j:
-        news_json = json.load(j)
+        out_json = json.load(j)
 
+    news_json = out_json['news']
+        
     logging.info('testing with lewissplit')
     test_lewis()
 
