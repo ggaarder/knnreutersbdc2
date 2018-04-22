@@ -221,15 +221,15 @@ def vector_abs(v, cache={}):
 
     return cache[v_hash]
 
-def cosine_similarity(v1, v2):
+def cosine_similarity(v1, v2): # accuracy ~ 0.16. very strange
     try:
         return inner_product(v1, v2)/vector_abs(v1)/vector_abs(v2)
-    except DividedByZeroError:
+    except ZeroDivisionError:
         v1x, v2x = v1+[1], v2+[1] # todo: is this workaround the best?
         return inner_product(v1x, v2x)/vector_abs(v1x)/vector_abs(v2x)
 
 def vector_similarity(v1, v2):
-    USE_COSINE = True
+    USE_COSINE = False
 
     if USE_COSINE:
         return cosine_similarity(v1, v2)
@@ -245,17 +245,60 @@ def get_majority(votes):
 
 def get_k_nearest_neighbors(knn_k_value, v, vx, labels):
     """
-    vx for train: {[label, vec]}
-    todo: divide-and-conquer optimize (see Introduction to Algorithms)
+    Arguments *vx*, *labels* are train data
+    Returns a list of **indexs** of the k-nearest neighbors
+        indexs in *vx* and *labels*
+    Assume len(vx) >= knn_k_value
     """
+    # quicksort-like divide-and-conquer optimize to finding K-Nearest
+    DC_OPT_TOGGLE = False
+
     logging.info('Calculating similarities')
     similarities = list(enumerate([vector_similarity(v, vv) for vv in vx]))
+    SORT_KEY = operator.itemgetter(1)
 
     logging.info('Sorting similarities')
-    sorted_neighbors = [i
-        for [i, _] in sorted(similarities, key=operator.itemgetter(1))]
 
-    return sorted_neighbors[:knn_k_value]
+    if not DC_OPT_TOGGLE:
+        sorted_neighbors = [i
+            for [i, _] in sorted(similarities, key=SORT_KEY)]
+
+        return sorted_neighbors[:knn_k_value]
+    else:
+        def get_k_smallest(k, xs, key=SORT_KEY):
+            """
+            WARNING: partition in-place
+            quicksort-like divide-and-conquer optimize to finding K-Nearest
+            """
+            if len(xs) < k: raise OverflowError()
+            elif len(xs) == k : return xs
+
+            # partition xs to xs[0..i] < xs[i+1] < xs[i+2..]
+
+            x = key(xs[-1]) # soldier
+            # note: if write x = xs[-1], we will get a ref, and x will change
+            # as xs[-1] may change (maybe) during the partition
+
+            i = -1
+            for j in range(0, len(xs)-1): # j from 0 to '-2', i.e. len(xs)-2
+                if key(xs[j]) <= x: # see the note about key(xs[-1]) above
+                    i += 1
+                    xs[i], xs[j] = xs[j], xs[i]
+            xs[i+1], xs[-1] = xs[-1], xs[i+1]
+
+            # we need how many neighbors more other than xs[0..i+1]
+            delta = k-(i+1)
+
+            if delta > 0: # needs more
+                return xs[:i+2] + get_k_smallest(k-delta, xs[i+2:i+2+delta])
+                #      xs[0..i+1]                         ^^^^^^^^^^^^^^^^
+                #                      xs[i+1:i+1+delta], *delta* elements
+                return get_k_smallest(k, xs[:i+1])
+            else:
+                return xs[:k] # xs[0..k-1], k elements
+
+        return [i
+            for [i, _] in get_k_smallest(knn_k_value, similarities)]
 
 def knn_classify(knn_k_value, v, vx, labels):
     """
@@ -276,7 +319,7 @@ def test_classify(testcorpus, traincorpus):
         if results[-1] == d.label:
             correct_cnt += 1
 
-        logging.info('Quiz #{} Accuracy {}'.format(i, correct_cnt/(i+1)))
+        logging.info('Quiz #{} (accuracy {})'.format(i, correct_cnt/(i+1)))
 
     return results
 
