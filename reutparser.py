@@ -2,6 +2,10 @@ import codecs
 import logging
 import os
 import re
+import nltk
+import itertools
+from nltk.stem.wordnet import WordNetLemmatizer
+from nltk.stem import LancasterStemmer
 from bs4 import BeautifulSoup
 
 def get_topic(reuter):
@@ -19,49 +23,55 @@ def get_doc(reuter):
 
         return '{}\t{}'.format(title, body)
 
+STOPWORDS = nltk.corpus.stopwords.words('english')
+LMTZR = WordNetLemmatizer()
+STEMMER = LancasterStemmer()
+
+def tokenize(doc):
+    out = []
+
+    for i in [i.split('/') for i in nltk.word_tokenize(doc)
+        if re.match(r'[a-z]', i)]:
+        preprocess = [re.sub(r'[^a-z]', '', j) for j in i
+            if j not in STOPWORDS and re.match(r'[a-z]', j)]
+        out += [i for i in preprocess if len(i) > 2]
+
+    return out
+
 def clean_doc(doc):
-    def conv_abbr(doc):
-        """
-        U.K. U.S.A. P.R.C. etc.. -> UK USA PRC ...
-        if not -> U K       U S A         P R C      (since [^A-Z] -> ' ')
-        """
-        result = []
-        for i in doc.split(' '):
-            if re.match(r'^([A-Z]\.?)+$', i):
-                i = i.replace('.', '')
-            result.append(i)
+    doc = doc.lower()
+    tokens = [STEMMER.stem(LMTZR.lemmatize(i)) for i in tokenize(doc)
+        if i not in STOPWORDS]
+    return ' '.join(sorted([i for i in tokens if len(i) > 2]))
 
-        return ' '.join(result)
+class ReuterErr(Exception):
+    pass
 
-    doc = doc.upper()
-    doc = re.sub(r'[\'"]+', '', doc)
-    doc = conv_abbr(doc)
-    doc = re.sub(r'[^A-Z]+', ' ', doc)
-    doc = re.sub(r'\s+', ' ', doc)
-    doc = re.sub(r'^\s+', '', doc)
-    doc = re.sub(r'\s$', '', doc)
-    return doc.lower()
+def parse_one_reuter_soup(reuter_soup):
+    split = reuter_soup['lewissplit']
+
+    if split not in ['TRAIN', 'TEST']:
+        raise ReuterErr('UNKNOWN SPLIT')
+
+    topic = get_topic(reuter_soup)
+    if topic == 'NO TOPICS' or topic == 'MULTI TOPICS':
+        raise ReuterErr('NOT ONE TOPIC')
+
+    doc = get_doc(reuter_soup)
+    if not doc:
+        raise ReuterErr('NO BODY')
+
+    return split, topic, clean_doc(doc)
 
 def parse_one_sgm(reutdat):
     soup = BeautifulSoup(reutdat, 'html.parser')
     reuters = soup.find_all('reuters')
 
     for i in range(len(reuters)):
-        reuter = reuters[i]
-        split = reuter['lewissplit']
-
-        if split not in ['TRAIN', 'TEST']:
-            continue
-
-        topic = get_topic(reuter)
-        if topic == 'NO TOPICS' or topic == 'MULTI TOPICS':
-            continue
-
-        doc = get_doc(reuter)
-        if not doc:
-            continue
-
-        yield split, topic, clean_doc(doc)
+        try:
+            yield parse_one_reuter_soup(reuters[i])
+        except ReuterErr:
+            pass
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
