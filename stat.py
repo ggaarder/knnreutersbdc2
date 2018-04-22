@@ -4,8 +4,6 @@ import operator
 import pandas as pd
 import reuters_util as util
 
-
-
 def simple_exam(actual, expected):
     """return correct_cnt, all_question_cnt"""
     if len(actual) != len(expected): raise OverflowError()
